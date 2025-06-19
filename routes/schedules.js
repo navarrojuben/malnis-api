@@ -3,6 +3,20 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const Schedule = require('../models/Schedule');
 
+// Utility: get all dates between two dates inclusive, formatted YYYY-MM-DD
+function getDatesBetween(startDate, endDate) {
+  const dates = [];
+  let current = new Date(startDate);
+  while (current <= endDate) {
+    const yyyy = current.getFullYear();
+    const mm = String(current.getMonth() + 1).padStart(2, '0');
+    const dd = String(current.getDate()).padStart(2, '0');
+    dates.push(`${yyyy}-${mm}-${dd}`);
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
 // Public route: Add a schedule (no authentication required)
 router.post('/', async (req, res) => {
   try {
@@ -60,29 +74,38 @@ router.post('/', async (req, res) => {
   }
 });
 
-
-// ✅ NEW: GET /schedules/availability - Get available time slots per date
+// ✅ NEW: GET /schedules/availability - Get available time slots per date (including dates with no bookings)
 router.get('/availability', async (req, res) => {
   try {
     const schedules = await Schedule.find({}, 'date time');
 
     const timeSlots = ['07:00 AM - 12:00 NN', '01:00 PM - 06:00 PM'];
-    const availabilityMap = {};
 
+    // Build map: date -> Set of booked times
+    const bookedMap = {};
     for (const sched of schedules) {
-      if (!availabilityMap[sched.date]) {
-        availabilityMap[sched.date] = new Set();
+      if (!bookedMap[sched.date]) {
+        bookedMap[sched.date] = new Set();
       }
-      availabilityMap[sched.date].add(sched.time);
+      bookedMap[sched.date].add(sched.time);
     }
+
+    // Define the date range for availability
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() + 1); // tomorrow
+    const endDate = new Date(today);
+    endDate.setMonth(endDate.getMonth() + 2); // two months ahead
+
+    const allDates = getDatesBetween(startDate, endDate);
 
     const response = {};
 
-    Object.keys(availabilityMap).forEach((date) => {
-      const taken = availabilityMap[date];
+    for (const date of allDates) {
+      const taken = bookedMap[date] || new Set();
       const available = timeSlots.filter(slot => !taken.has(slot));
       response[date] = available;
-    });
+    }
 
     res.json(response);
   } catch (err) {
@@ -90,7 +113,6 @@ router.get('/availability', async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch availability' });
   }
 });
-
 
 // ⛔ Removed: GET /schedules/dates (no longer needed)
 
