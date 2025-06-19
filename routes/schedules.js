@@ -9,7 +9,7 @@ router.post('/', async (req, res) => {
     const {
       name,
       address,
-      contactNumber,   // Added contactNumber here
+      contactNumber,
       date,
       time,
       serviceType,
@@ -18,14 +18,13 @@ router.post('/', async (req, res) => {
       longitude,
     } = req.body;
 
-    // Debug log to see incoming request
     console.log('📦 Incoming schedule:', req.body);
 
-    // Validate required fields including contactNumber
+    // Validate required fields
     if (
       !name ||
       !address ||
-      !contactNumber ||      // Validate contactNumber
+      !contactNumber ||
       !date ||
       !time ||
       !serviceType ||
@@ -35,10 +34,16 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'Missing or invalid required fields.' });
     }
 
+    // Prevent double booking for the same date/time
+    const existing = await Schedule.findOne({ date, time });
+    if (existing) {
+      return res.status(409).json({ message: 'This time slot is already booked for that date.' });
+    }
+
     const schedule = new Schedule({
       name,
       address,
-      contactNumber,   // Save contactNumber
+      contactNumber,
       date,
       time,
       serviceType,
@@ -55,12 +60,43 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Apply authentication middleware for all routes below (admin-only)
+
+// ✅ NEW: GET /schedules/availability - Get available time slots per date
+router.get('/availability', async (req, res) => {
+  try {
+    const schedules = await Schedule.find({}, 'date time');
+
+    const timeSlots = ['07:00 AM - 12:00 NN', '01:00 PM - 06:00 PM'];
+    const availabilityMap = {};
+
+    for (const sched of schedules) {
+      if (!availabilityMap[sched.date]) {
+        availabilityMap[sched.date] = new Set();
+      }
+      availabilityMap[sched.date].add(sched.time);
+    }
+
+    const response = {};
+
+    Object.keys(availabilityMap).forEach((date) => {
+      const taken = availabilityMap[date];
+      const available = timeSlots.filter(slot => !taken.has(slot));
+      response[date] = available;
+    });
+
+    res.json(response);
+  } catch (err) {
+    console.error('Error fetching availability:', err);
+    res.status(500).json({ message: 'Failed to fetch availability' });
+  }
+});
+
+
+// ⛔ Removed: GET /schedules/dates (no longer needed)
+
+// 🔐 Protected admin routes
 router.use(authMiddleware);
 
-// Admin-only routes:
-
-// Get all schedules
 router.get('/', async (req, res) => {
   try {
     const schedules = await Schedule.find();
@@ -70,7 +106,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get schedule by ID
 router.get('/:id', async (req, res) => {
   try {
     const schedule = await Schedule.findById(req.params.id);
@@ -81,7 +116,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Update schedule by ID
 router.put('/:id', async (req, res) => {
   try {
     const updatedSchedule = await Schedule.findByIdAndUpdate(
@@ -96,7 +130,6 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Delete schedule by ID
 router.delete('/:id', async (req, res) => {
   try {
     const deletedSchedule = await Schedule.findByIdAndDelete(req.params.id);
